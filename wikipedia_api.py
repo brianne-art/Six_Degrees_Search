@@ -97,30 +97,34 @@ def get_outgoing_links(title):
         raise Exception(f"Error accessing Wikipedia API: {e}")
 
 
-def get_incoming_links(title):
-    """Get all incoming links (backlinks) to a Wikipedia article (namespace 0 only).
+def get_incoming_links(title, max_links=500):
+    """Get incoming links (backlinks) to a Wikipedia article (namespace 0 only).
 
     Uses hybrid approach: combines cached backlinks with fresh API results.
-    This ensures completeness while building the cache over time.
+    Limited to max_links to improve performance (most searches don't need all backlinks).
     """
     normalized = normalize_title(title)
 
     # Get any cached backlinks
     cached_backlinks = set(get_cached_backlinks(normalized))
 
-    # Always fetch from API for completeness
+    # If we have enough cached, return them
+    if len(cached_backlinks) >= max_links:
+        return list(cached_backlinks)[:max_links]
+
+    # Fetch from API (limited)
     api_links = []
     params = {
         "action": "query",
         "list": "backlinks",
         "bltitle": normalized,
-        "bllimit": "max",
+        "bllimit": "500",  # Fetch 500 at a time
         "blnamespace": "0",
         "format": "json"
     }
 
     try:
-        while True:
+        while len(api_links) < max_links:
             response = requests.get(WIKIPEDIA_API_URL, params=params, headers=HEADERS, timeout=30)
             response.raise_for_status()
             data = response.json()
@@ -132,18 +136,18 @@ def get_incoming_links(title):
                 # Cache this backlink relationship
                 cache_backlink(link_title, normalized)
 
-            if "continue" in data:
+            if "continue" in data and len(api_links) < max_links:
                 params["blcontinue"] = data["continue"]["blcontinue"]
-                time.sleep(REQUEST_DELAY)  # Rate limiting
+                time.sleep(REQUEST_DELAY)
             else:
                 break
 
-        # Combine cached and API results (remove duplicates)
-        all_backlinks = list(cached_backlinks.union(set(api_links)))
+        # Combine cached and API results (remove duplicates), limit total
+        all_backlinks = list(cached_backlinks.union(set(api_links)))[:max_links]
         return all_backlinks
 
     except requests.RequestException as e:
         # If API fails, return cached backlinks if available
         if cached_backlinks:
-            return list(cached_backlinks)
+            return list(cached_backlinks)[:max_links]
         raise Exception(f"Error accessing Wikipedia API: {e}")
