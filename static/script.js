@@ -1,0 +1,1 @@
+// Wikipedia Chain Finder JavaScript
