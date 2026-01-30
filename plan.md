@@ -310,15 +310,107 @@ Ensure the complete application works reliably with various inputs and edge case
 
 ---
 
+## Phase 7: Database Caching Layer
+
+### Goals
+Add a persistent SQLite database to cache page links and reduce Wikipedia API calls. Subsequent searches will use cached data when available, dramatically improving performance.
+
+### Tasks
+1. Create database module (`database.py`):
+   - Initialize SQLite database (`wikipedia_cache.db`)
+   - Create `pages` table (id, title, last_fetched)
+   - Create `links` table (source_page_id, target_page_title)
+   - Add appropriate indexes for fast lookups
+
+2. Implement cache operations:
+   - `is_page_cached(title)` - Check if page exists in database
+   - `get_cached_links(title)` - Get outgoing links from cache
+   - `get_cached_backlinks(title)` - Get incoming links from cache
+   - `cache_page_links(title, links)` - Store page and its links
+
+3. Update `wikipedia_api.py` to use cache:
+   - **Forward links**: Check cache first, only call API if not cached
+   - **Backward links**: Query cache + always call API (hybrid approach)
+   - Cache any newly discovered links from API responses
+
+4. Database initialization:
+   - Create database file on first run
+   - Initialize tables at application startup
+   - Handle missing database gracefully
+
+### Database Schema
+```sql
+-- pages table
+CREATE TABLE pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT UNIQUE NOT NULL,
+    last_fetched TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_title ON pages(title);
+
+-- links table
+CREATE TABLE links (
+    source_page_id INTEGER NOT NULL,
+    target_page_title TEXT NOT NULL,
+    FOREIGN KEY (source_page_id) REFERENCES pages(id),
+    PRIMARY KEY (source_page_id, target_page_title)
+);
+CREATE INDEX idx_source ON links(source_page_id);
+CREATE INDEX idx_target ON links(target_page_title);
+```
+
+### Cache Strategy
+
+**Forward Links (Outgoing)**:
+1. Check if page title exists in `pages` table
+2. If cached: Return links from `links` table (no API call)
+3. If not cached: Fetch from API, cache results, return links
+
+**Backward Links (Incoming)** - Hybrid Approach:
+1. Query database for any cached backlinks
+2. Also fetch backlinks from Wikipedia API
+3. Cache any newly discovered link relationships
+4. Return combined results
+
+*Rationale*: The database only contains backlinks we've previously encountered. Always calling the API ensures search completeness while gradually building the cache.
+
+### Error Handling
+- Database corruption: Delete and recreate
+- Database locked: Retry with backoff
+- Insert failures: Log error, continue search (don't crash)
+- Fallback: If database fails, operate in API-only mode
+
+### Testing Checklist
+- [ ] Database file is created on first run
+- [ ] Tables and indexes are created correctly
+- [ ] First search for an article calls Wikipedia API
+- [ ] Second search for same article uses cache (no API call for forward links)
+- [ ] Cached links match what was returned from API
+- [ ] Backlinks hybrid approach works (cache + API combined)
+- [ ] Database errors don't crash the application
+- [ ] Search still works if database file is deleted (recreates it)
+- [ ] Performance improvement is measurable on repeated searches
+
+### Performance Verification
+Run the same search twice and compare:
+- First run: Count API calls made
+- Second run: Verify reduced API calls (forward links should be cached)
+
+---
+
 ## Final Deliverables
 
 Upon completion of all phases, the project should include:
 
-1. **`app.py`**: Flask backend with `/find-path` endpoint and search algorithm
-2. **`static/index.html`**: Frontend HTML structure
-3. **`static/style.css`**: Styling for the UI
-4. **`static/script.js`**: Frontend JavaScript logic
-5. **`requirements.txt`**: Python dependencies
+1. **`app.py`**: Flask backend with `/find-path` endpoint
+2. **`wikipedia_api.py`**: Wikipedia API integration with caching
+3. **`search.py`**: Bidirectional search algorithm
+4. **`database.py`**: SQLite caching layer
+5. **`static/index.html`**: Frontend HTML structure
+6. **`static/style.css`**: Styling for the UI
+7. **`static/script.js`**: Frontend JavaScript logic
+8. **`requirements.txt`**: Python dependencies
+9. **`wikipedia_cache.db`**: SQLite cache database (auto-generated)
 
 The application should:
 - Find shortest paths between Wikipedia articles (up to 7 articles / 6 links)
@@ -326,3 +418,4 @@ The application should:
 - Display results as clickable Wikipedia links
 - Handle errors gracefully with informative messages
 - Work reliably across multiple searches
+- Cache Wikipedia data for improved performance on repeated searches

@@ -28,14 +28,19 @@ document.addEventListener('DOMContentLoaded', function() {
         setFormDisabled(true);
 
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
             const response = await fetch('/find-path', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ start, end })
+                body: JSON.stringify({ start, end }),
+                signal: controller.signal
             });
 
+            clearTimeout(timeoutId);
             const data = await response.json();
 
             if (data.success) {
@@ -44,7 +49,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 showError(data.error);
             }
         } catch (err) {
-            showError('Connection error. Please try again.');
+            if (err.name === 'AbortError') {
+                showError('Search timed out. Try articles that are more closely related.');
+            } else {
+                showError('Connection error: ' + err.message);
+            }
         } finally {
             hideLoading();
             setFormDisabled(false);

@@ -1,9 +1,17 @@
 import requests
+import time
+from database import (
+    get_cached_links,
+    get_cached_backlinks,
+    cache_page_links,
+    cache_backlink
+)
 
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
 HEADERS = {
-    "User-Agent": "WikipediaChainFinder/1.0 (Educational project)"
+    "User-Agent": "WikipediaChainFinder/1.0 (Educational project; contact@example.com)"
 }
+REQUEST_DELAY = 0.1  # Small delay between API requests to avoid rate limiting
 
 
 def normalize_title(title):
@@ -34,13 +42,23 @@ def article_exists(title):
                 return False
             return True
         return False
-    except requests.RequestException:
-        raise Exception("Error accessing Wikipedia API")
+    except requests.RequestException as e:
+        raise Exception(f"Error accessing Wikipedia API: {e}")
 
 
 def get_outgoing_links(title):
-    """Get all outgoing links from a Wikipedia article (namespace 0 only)."""
+    """Get all outgoing links from a Wikipedia article (namespace 0 only).
+
+    Uses cache if available, otherwise fetches from API and caches result.
+    """
     normalized = normalize_title(title)
+
+    # Check cache first
+    cached = get_cached_links(normalized)
+    if cached is not None:
+        return cached
+
+    # Not cached, fetch from API
     links = []
     params = {
         "action": "query",
@@ -67,18 +85,31 @@ def get_outgoing_links(title):
 
             if "continue" in data:
                 params["plcontinue"] = data["continue"]["plcontinue"]
+                time.sleep(REQUEST_DELAY)  # Rate limiting
             else:
                 break
 
+        # Cache the results
+        cache_page_links(normalized, links)
+
         return links
-    except requests.RequestException:
-        raise Exception("Error accessing Wikipedia API")
+    except requests.RequestException as e:
+        raise Exception(f"Error accessing Wikipedia API: {e}")
 
 
 def get_incoming_links(title):
-    """Get all incoming links (backlinks) to a Wikipedia article (namespace 0 only)."""
+    """Get all incoming links (backlinks) to a Wikipedia article (namespace 0 only).
+
+    Uses hybrid approach: combines cached backlinks with fresh API results.
+    This ensures completeness while building the cache over time.
+    """
     normalized = normalize_title(title)
-    links = []
+
+    # Get any cached backlinks
+    cached_backlinks = set(get_cached_backlinks(normalized))
+
+    # Always fetch from API for completeness
+    api_links = []
     params = {
         "action": "query",
         "list": "backlinks",
@@ -96,13 +127,23 @@ def get_incoming_links(title):
 
             backlinks = data.get("query", {}).get("backlinks", [])
             for link in backlinks:
-                links.append(link["title"].replace(" ", "_"))
+                link_title = link["title"].replace(" ", "_")
+                api_links.append(link_title)
+                # Cache this backlink relationship
+                cache_backlink(link_title, normalized)
 
             if "continue" in data:
                 params["blcontinue"] = data["continue"]["blcontinue"]
+                time.sleep(REQUEST_DELAY)  # Rate limiting
             else:
                 break
 
-        return links
-    except requests.RequestException:
-        raise Exception("Error accessing Wikipedia API")
+        # Combine cached and API results (remove duplicates)
+        all_backlinks = list(cached_backlinks.union(set(api_links)))
+        return all_backlinks
+
+    except requests.RequestException as e:
+        # If API fails, return cached backlinks if available
+        if cached_backlinks:
+            return list(cached_backlinks)
+        raise Exception(f"Error accessing Wikipedia API: {e}")

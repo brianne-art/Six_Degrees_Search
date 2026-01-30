@@ -117,6 +117,12 @@ h1 {
     color: #666;
 }
 
+.loading-note {
+    font-size: 0.85rem;
+    color: #999;
+    margin-top: 8px;
+}
+
 .error {
     background-color: #fef2f2;
     border: 1px solid #fecaca;

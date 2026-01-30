@@ -182,3 +182,155 @@ project/
 - Alternate between forward and backward search to balance exploration
 - Stop immediately when intersection found
 - Process all links at current depth before going deeper (BFS within each level)
+
+## 10. Extension: Database Caching Layer
+
+### Overview
+Add a persistent SQLite database to cache page links and dramatically reduce Wikipedia API calls. The cache stores relationships between pages (which pages link to which) so that repeated searches can use local data instead of making redundant API requests.
+
+### Database Schema
+
+**SQLite Database**: `wikipedia_cache.db`
+
+**pages table**:
+```sql
+CREATE TABLE pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT UNIQUE NOT NULL,
+    last_fetched TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_title ON pages(title);
+```
+
+**links table**:
+```sql
+CREATE TABLE links (
+    source_page_id INTEGER NOT NULL,
+    target_page_title TEXT NOT NULL,
+    FOREIGN KEY (source_page_id) REFERENCES pages(id),
+    PRIMARY KEY (source_page_id, target_page_title)
+);
+
+CREATE INDEX idx_source ON links(source_page_id);
+CREATE INDEX idx_target ON links(target_page_title);
+```
+
+### Cache Lookup Strategy
+
+**For Forward Links (Outgoing Links)**:
+1. Check if page title exists in `pages` table
+2. If cached:
+   - Query `links` table WHERE `source_page_id = page_id`
+   - Return cached links immediately (no API call)
+3. If not cached:
+   - Fetch links from Wikipedia API
+   - Insert page into `pages` table
+   - Insert all links into `links` table
+   - Return links for search
+
+**For Backward Links (Incoming Links/Backlinks)**:
+1. Query database for cached backlinks:
+   - JOIN `pages` and `links` tables
+   - Find all pages WHERE `target_page_title = article_name`
+2. Also fetch backlinks from Wikipedia API (to get complete set)
+3. For each backlink returned by API:
+   - If the linking page doesn't exist in `pages` table, add it
+   - If the link relationship doesn't exist in `links` table, add it
+4. Return combined list of all backlinks (cached + newly discovered from API)
+
+**Rationale for hybrid backlink approach**: The database only contains backlinks we've previously encountered. Wikipedia has many more backlinks that we haven't cached yet. By always calling the API for backlinks and caching new discoveries, we gradually build a more complete database while ensuring search completeness.
+
+### Database Operations
+
+**Check if page is cached**:
+```sql
+SELECT id FROM pages WHERE title = ?
+```
+
+**Get outgoing links**:
+```sql
+SELECT target_page_title FROM links WHERE source_page_id = ?
+```
+
+**Get incoming links (backlinks)**:
+```sql
+SELECT p.title 
+FROM pages p
+JOIN links l ON p.id = l.source_page_id
+WHERE l.target_page_title = ?
+```
+
+**Cache new page**:
+```sql
+INSERT OR IGNORE INTO pages (title) VALUES (?);
+```
+
+**Cache link relationship**:
+```sql
+INSERT OR IGNORE INTO links (source_page_id, target_page_title) 
+VALUES (?, ?);
+```
+
+### Implementation Details
+
+**Database Initialization**:
+- Create empty database on first run
+- Database file location: same directory as `app.py`
+- Initialize tables if they don't exist at application startup
+
+**Cache Growth**:
+- Allow database to grow indefinitely (no size limits)
+- No cache eviction policy
+- No cleanup of old entries
+
+**Cache Freshness**:
+- Never refresh cached data (no expiration)
+- Once links are cached, use them forever
+- Assume Wikipedia link structure is stable enough for this use case
+
+**On-Demand Fetching**:
+- Fetch pages from API as they're encountered during search
+- Don't pre-fetch or batch-fetch multiple pages
+- Each uncached page triggers one API call when needed
+
+**Database Connection**:
+- Use connection pooling or persistent connection
+- Close database properly on application shutdown
+- Handle SQLite locking for concurrent access (though single-threaded, still good practice)
+
+### Performance Benefits
+
+**Before Caching**:
+- Every article requires an API call
+- Search with 100 articles explored = 100+ API calls
+- Slow performance, high API load
+
+**After Caching**:
+- First search: Same API calls (builds cache)
+- Subsequent searches: Mostly cached data
+- Popular articles (common in searches) quickly become fully cached
+- API calls only for new, uncached articles
+
+**Expected Speedup**:
+- Cold cache (first run): No speedup
+- Warm cache (after several searches): 50-90% reduction in API calls
+- Hot cache (well-used system): 90%+ reduction in API calls
+
+### Additional Python Dependencies
+
+Add to `requirements.txt`:
+- sqlite3 (built into Python, no separate install needed)
+
+### Error Handling
+
+**Database Errors**:
+- If database file is corrupted: Delete and recreate
+- If database is locked: Retry with exponential backoff
+- If insert fails: Log error but continue search (don't crash)
+- Fallback: If database operations fail, fall back to API-only mode
+
+**Migration Path**:
+- Version 1 (no caching) can be upgraded by adding database layer
+- No changes needed to API contract or frontend
+- Backward compatible: can run without database if needed

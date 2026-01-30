@@ -137,4 +137,4 @@ def find_path(start, end):
         if depth < MAX_DEPTH:
             forward_frontier = expand_forward(forward_frontier, forward_visited)
 
-    raise NoPathFoundError("No path found within 7 articles")
+    raise NoPathFoundError(f"No path found between '{start.replace('_', ' ')}' and '{end.replace('_', ' ')}' within 6 links")
