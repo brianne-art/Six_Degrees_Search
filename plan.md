@@ -102,23 +102,52 @@ Implement the core bidirectional BFS algorithm that finds the shortest path betw
 
 ### Algorithm Pseudocode
 ```
-forward_visited = {start: None}
-backward_visited = {end: None}
+forward_visited = {start: None}   # Depth 0: just the start article
+backward_visited = {end: None}    # Depth 0: just the end article
 forward_frontier = {start}
 backward_frontier = {end}
 
-for depth in range(1, 4):  # Max depth 3
-    # Expand forward
+# Check for direct link before entering the loop (1-link path = 2 articles)
+start_links = get_outgoing_links(start)
+if end in start_links:
+    return [start, end]
+
+# Max depth 3 per direction = up to 6 total links = 7 articles max
+# Depth 1: 1 link from start + 1 link from end = paths up to 3 articles
+# Depth 2: 2 links from start + 2 links from end = paths up to 5 articles
+# Depth 3: 3 links from start + 3 links from end = paths up to 7 articles
+for depth in range(1, 4):  # depth = 1, 2, 3
+    # Expand forward by one level
     forward_frontier = expand_forward(forward_frontier, forward_visited)
     if intersection := find_intersection(forward_visited, backward_visited):
         return reconstruct_path(intersection, ...)
 
-    # Expand backward
+    # Expand backward by one level
     backward_frontier = expand_backward(backward_frontier, backward_visited)
     if intersection := find_intersection(forward_visited, backward_visited):
         return reconstruct_path(intersection, ...)
 
 return None  # No path found
+```
+
+### Pagination Guidance
+When expanding a frontier, you must fetch all links for each article in the frontier before moving to the next depth level. Implementation approach:
+
+1. **Batch processing**: For each article in the current frontier, call `get_outgoing_links()` or `get_incoming_links()` which internally handles Wikipedia API pagination
+2. **Build next frontier**: Collect all newly discovered articles (not already in visited) into the next frontier
+3. **Update visited**: For each new article, record its parent (the article it was discovered from)
+4. **Complete the level**: Only after ALL articles in the current frontier have been fully expanded should you check for intersection and proceed to the next depth
+
+```python
+def expand_forward(frontier, visited):
+    next_frontier = set()
+    for article in frontier:
+        links = get_outgoing_links(article)  # Handles pagination internally
+        for link in links:
+            if link not in visited:
+                visited[link] = article  # Record parent
+                next_frontier.add(link)
+    return next_frontier
 ```
 
 ### Testing Checklist
@@ -130,6 +159,7 @@ return None  # No path found
 - [ ] Algorithm terminates within reasonable time (not infinite loop)
 - [ ] Paths returned are at most 7 articles long
 - [ ] Test with known short paths (e.g., articles that directly link to each other)
+- [ ] Direct link detection works (e.g., "Python_(programming_language)" → "Guido_van_Rossum" returns 2-article path)
 
 ---
 

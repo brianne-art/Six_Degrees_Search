@@ -9,8 +9,34 @@
 <body>
     <div class="container">
         <h1>Wikipedia Chain Finder</h1>
-        <p>Find the shortest path between two Wikipedia articles</p>
+        <p class="subtitle">Find the shortest path between two Wikipedia articles</p>
+
+        <form id="search-form">
+            <div class="input-group">
+                <label for="start-article">Start Article</label>
+                <input type="text" id="start-article" name="start" placeholder="e.g., Albert Einstein" required>
+            </div>
+            <div class="input-group">
+                <label for="end-article">End Article</label>
+                <input type="text" id="end-article" name="end" placeholder="e.g., Physics" required>
+            </div>
+            <button type="submit" id="submit-btn">Find Path</button>
+        </form>
+
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Searching for path...</p>
+        </div>
+
+        <div id="error" class="error hidden"></div>
+
+        <div id="results" class="results hidden">
+            <h2>Path Found!</h2>
+            <p id="path-length"></p>
+            <ol id="path-list"></ol>
+        </div>
     </div>
+
     <script src="script.js"></script>
 </body>
 </html>
